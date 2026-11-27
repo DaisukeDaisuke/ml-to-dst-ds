@@ -1,0 +1,41 @@
+diff --git a/desmume/src/frontend/posix/cli/main.cpp b/desmume/src/frontend/posix/cli/main.cpp
+--- a/desmume/src/frontend/posix/cli/main.cpp
++++ b/desmume/src/frontend/posix/cli/main.cpp
+@@ -42,5 +42,6 @@
+ #include "../render3D.h"
+ #include "../rasterize.h"
+ #include "../saves.h"
++#include "../armcpu.h"
+ #include "../frontend/modules/osd/agg/agg_osd.h"
+ #include "../shared/desmume_config.h"
+@@ -486,5 +487,30 @@
+   }
+ 
+   execute = true;
++  if (const char* state = getenv("ML2DST_SAVE"))
++    return savestate_save(state) ? 0 : 2;
++  if (const char* state = getenv("ML2DST_LOAD")) {
++    if (!savestate_load(state)) return 3;
++    if (NDS_ARM9.instruct_adr != 0x02000004 || NDS_ARM9.R[0] != 0x02001000) {
++      fprintf(stderr, "Converted ARM9 execution state was not restored\n");
++      return 6;
++    }
++    const auto readCounter = []() {
++      return static_cast<u32>(MMU.MAIN_MEM[0x1000])
++        | (static_cast<u32>(MMU.MAIN_MEM[0x1001]) << 8)
++        | (static_cast<u32>(MMU.MAIN_MEM[0x1002]) << 16)
++        | (static_cast<u32>(MMU.MAIN_MEM[0x1003]) << 24);
++    };
++    if (readCounter() != 0x12345678) {
++      fprintf(stderr, "Converted RAM was not restored\n");
++      return 4;
++    }
++    NDS_exec<false>();
++    if (readCounter() <= 0x12345678) {
++      fprintf(stderr, "Converted ARM9 did not advance the counter\n");
++      return 5;
++    }
++    return 0;
++  }
+ 
+   /* X11 multi-threading support */

@@ -1,0 +1,40 @@
+diff --git a/src/frontend/qt_sdl/main.cpp b/src/frontend/qt_sdl/main.cpp
+--- a/src/frontend/qt_sdl/main.cpp
++++ b/src/frontend/qt_sdl/main.cpp
+@@ -64,5 +64,10 @@
+ 
+ #include "Net_PCap.h"
+ #include "Net_Slirp.h"
++#include <fstream>
++#include <iterator>
++#include <vector>
++#include "NDS.h"
++#include "Savestate.h"
+ 
+ using namespace melonDS;
+@@ -328,4 +333,25 @@
+ 
+     MelonApplication melon(argc, argv);
++    if (argc == 4 && std::string(argv[1]) == "--ml2dst-fixture")
++    {
++        std::ifstream input(argv[2], std::ios::binary);
++        std::vector<melonDS::u8> rom(std::istreambuf_iterator<char>(input), {});
++        if (rom.empty()) return 2;
++        auto cart = melonDS::NDSCart::ParseROM(rom.data(), rom.size());
++        if (!cart) return 3;
++        auto nds = std::make_unique<melonDS::NDS>();
++        nds->SetNDSCart(std::move(cart));
++        nds->Reset();
++        nds->SetupDirectBoot(argv[2]);
++        nds->ARM9Write32(0x02001000, 0x12345678);
++        nds->ARM9.R[0] = 0x02001000;
++        nds->ARM9.JumpTo(0x02000004);
++        nds->Start();
++        melonDS::Savestate state;
++        if (!nds->DoSavestate(&state) || state.Error) return 4;
++        std::ofstream output(argv[3], std::ios::binary);
++        output.write(static_cast<const char*>(state.Buffer()), state.Length());
++        return output ? 0 : 5;
++    }
+     pathInit();
+ 

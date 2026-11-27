@@ -1,0 +1,6 @@
+[submodule "upstream/melonDS"]
+	path = upstream/melonDS
+	url = https://github.com/melonDS-emu/melonDS.git
+[submodule "upstream/desmume"]
+	path = upstream/desmume
+	url = https://github.com/TASEmulators/desmume.git

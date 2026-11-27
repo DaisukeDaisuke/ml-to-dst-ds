@@ -1,0 +1,78 @@
+name: Build and deploy Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install upstream build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build meson pkg-config libsdl2-dev libpcap-dev \
+            libx11-dev zlib1g-dev qt6-base-dev qt6-base-private-dev qt6-multimedia-dev \
+            qt6-svg-dev libarchive-dev libzstd-dev libfaad-dev libasound2-dev \
+            libgl-dev libegl-dev extra-cmake-modules libwayland-dev wayland-protocols \
+            libcurl4-gnutls-dev libenet-dev
+      - name: Build melonDS
+        run: |
+          git -C upstream/melonDS apply "$PWD/tests/melon-probe.patch"
+          cmake -S upstream/melonDS -B build/melon -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_JIT=OFF -DENABLE_GDBSTUB=OFF -DENABLE_LTO_RELEASE=OFF
+          cmake --build build/melon --parallel 2
+      - name: Build DeSmuME
+        run: |
+          git -C upstream/desmume apply "$PWD/tests/desmume-probe.patch"
+          meson setup build/desmume upstream/desmume/desmume/src/frontend/posix \
+            -Dfrontend-gtk=false -Dfrontend-cli=true
+          meson compile -C build/desmume -j 2
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '4.0.20'
+      - name: Build WebAssembly
+        run: bash build-web.sh
+      - name: Convert a native melonDS state and resume it with DeSmuME
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SDL_AUDIODRIVER: dummy
+        run: |
+          mkdir -p build/probe
+          python3 tests/make-rom.py build/probe/fixture.nds
+          build/melon/melonDS --ml2dst-fixture build/probe/fixture.nds build/probe/source.ml
+          ML2DST_SAVE="$PWD/build/probe/template.dst" build/desmume/cli/desmume-cli build/probe/fixture.nds
+          node tests/wasm-smoke.mjs build/probe/{source.ml,template.dst,fixture.nds,result.dst}
+          ML2DST_LOAD="$PWD/build/probe/result.dst" build/desmume/cli/desmume-cli build/probe/fixture.nds
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deploy
+        uses: actions/deploy-pages@v4
