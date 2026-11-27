@@ -18,12 +18,12 @@
 </style>
 <main>
   <h1>melonDS → DeSmuME</h1>
-  <p>同じDS ROMから作ったステートを使います。選んだファイルはブラウザ内で処理します。</p>
+  <p>同じDS ROMのステートまたはゲーム内セーブを使います。選んだファイルはブラウザ内で処理します。</p>
   <form id="convert">
     <label>変換元の melonDS ステート（形式 14.0）
       <input id="ml" type="file" required>
     </label>
-    <label>同じROMの DeSmuME ステート（内部形式 12 / 13）
+    <label>同じROMの DeSmuME ステート（内部形式 12 / 13）またはゲーム内セーブ（.sav）
       <input id="dst" type="file" required>
     </label>
     <label>ニンテンドーDS ROM（.nds）
@@ -33,7 +33,7 @@
       <input id="bios" type="file" accept=".bin">
     </label>
     <label class="consent"><input type="checkbox" required>
-      試験版です。3D・音声・通信・タイマーなどは変換先ステートの状態を引き継ぎます。ゲームが停止したり、画面が崩れたりする場合があります。
+      試験版です。3D・音声・通信・タイマーなどは変換先ステートの状態を引き継ぎます。.sav の場合は起動直後の状態が使われます。ゲームが停止したり、画面が崩れたりする場合があります。
     </label>
     <button>変換して .dst を保存</button>
     <output id="status" role="status" aria-live="polite"></output>

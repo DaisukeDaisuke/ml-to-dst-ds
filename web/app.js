@@ -1,4 +1,5 @@
 import createConverter from "./converter.mjs";
+import { isRawSave, makeTemplate } from "./dst-template.mjs";
 
 const form = document.querySelector("#convert");
 const status = document.querySelector("#status");
@@ -47,6 +48,11 @@ form.addEventListener("submit", async (event) => {
       readState(ml), readState(dst), readRomCode(rom),
       bios ? readState(bios) : new Uint8Array(),
     ]);
+    if (isRawSave(dst, inputs[1])) {
+      status.textContent = "DeSmuMEでセーブを読み込み中…";
+      inputs[1] = await makeTemplate(rom, inputs[1]);
+      status.textContent = "変換中…";
+    }
     const allocations = [];
     try {
       for (const input of inputs) {

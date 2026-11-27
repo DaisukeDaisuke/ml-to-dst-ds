@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
       - name: Install upstream build dependencies
         run: |
           sudo apt-get update
@@ -56,6 +56,10 @@ jobs:
             node tests/wasm-smoke.mjs "$probe"/{source.ml,template.dst,fixture.nds,result.dst}
             ML2DST_LOAD="$PWD/$probe/result.dst" build/desmume/cli/desmume-cli "$probe/fixture.nds"
           done
+          probe=build/probe/retail
+          node tests/save-template.mjs "$probe/fixture.nds" "$probe/from-sav.dst"
+          node tests/wasm-smoke.mjs "$probe"/{source.ml,from-sav.dst,fixture.nds,result-from-sav.dst}
+          ML2DST_LOAD="$PWD/$probe/result-from-sav.dst" build/desmume/cli/desmume-cli "$probe/fixture.nds"
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:

@@ -4,3 +4,7 @@
 [submodule "upstream/desmume"]
 	path = upstream/desmume
 	url = https://github.com/TASEmulators/desmume.git
+	branch = master
+[submodule "upstream/desmume-webassembly"]
+	path = upstream/desmume-webassembly
+	url = https://github.com/DaisukeDaisuke/desmume_webassembly.git

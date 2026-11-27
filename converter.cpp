@@ -316,6 +316,35 @@ void cpu(View in, Target& out, U id, char core) {
     write("iws", 0, 1);
 }
 
+void transfer_mpu(Slice cp15, View regions, U data_access, U code_access) {
+    put(cp15, 36, data_access);
+    put(cp15, 40, code_access);
+    std::ranges::copy(regions, cp15.begin() + 44);
+    // DeSmuME serializes its derived access tables as well as the registers.
+    // Tables are ordered like armcp15_saveone: six masks, then six match values.
+    for (unsigned i = 0; i < 8; ++i) {
+        const U region = get(regions, 4 * i);
+        const U log_size = ((region >> 1) & 31) + 1;
+        const bool enabled = region & 1;
+        const U mask = enabled && log_size < 32 ? ~(((1U << log_size) - 1) | 63U) : 0;
+        const U data = (data_access >> (4 * i)) & 15;
+        const U code = (code_access >> (4 * i)) & 15;
+        const bool allowed[] = {
+            data == 3, data >= 1 && data <= 3,
+            data == 2 || data == 3 || data == 6,
+            (data >= 1 && data <= 3) || data == 5 || data == 6,
+            code == 2 || code == 3 || code == 6,
+            (code >= 1 && code <= 3) || code == 6,
+        };
+        for (unsigned table = 0; table < 6; ++table) {
+            const unsigned offset = 112 + 32 * table + 4 * i;
+            const bool access = enabled && allowed[table];
+            put(cp15, offset, access ? mask : 0);
+            put(cp15, offset + 192, access ? region & mask : 0xffffffff);
+        }
+    }
+}
+
 void memory(const Source& source, Target& out) {
     Reader r{source.at("NDSG")};
     check(r.read() == 0, "Only Nintendo DS mode is supported");
@@ -369,11 +398,7 @@ void memory(const Source& source, Target& out) {
     auto code_cache = cp.read(), data_cache = cp.read(), write_buffer = cp.read();
     auto code_access = cp.read(), data_access = cp.read();
     auto regions = cp.take(32);
-    if (control & 1) {
-        check(std::ranges::equal(regions, part(cp15, 44, 32))
-              && code_access == get(cp15, 40) && data_access == get(cp15, 36),
-              "MPU configuration differs. Use a DeSmuME template closer to the original scene.");
-    }
+    transfer_mpu(cp15, regions, data_access, code_access);
     put(cp15, 16, control);
     put(cp15, 20, data_cache);
     put(cp15, 24, code_cache);
