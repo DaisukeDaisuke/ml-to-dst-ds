@@ -22,10 +22,24 @@ try {
   assert.equal(run(), 1, module.UTF8ToString(module._result_error()));
   const start = module._result_data();
   const result = module.HEAPU8.slice(start, start + module._result_size());
+  assert.equal(new DataView(result.buffer).getUint32(16, true), dst.readUInt32LE(16));
   await writeFile(output, result);
+
+  // Exercise a version-13 header with the same chunk layout as the upstream fixture.
+  const [dstPointer] = inputs[1];
+  new DataView(module.HEAPU8.buffer).setUint32(dstPointer + 16, 13, true);
+  assert.equal(run(), 1, module.UTF8ToString(module._result_error()));
+  const start13 = module._result_data();
+  const result13 = module.HEAPU8.slice(start13, start13 + module._result_size());
+  assert.equal(new DataView(result13.buffer).getUint32(16, true), 13);
+  assert.deepEqual(result13.subarray(20), result.subarray(20));
+
   module.HEAPU8[inputs[2][0] + 64] ^= 1;
   assert.equal(run(), 0);
   assert.match(module.UTF8ToString(module._result_error()), /different ROM|ROM照合が一致しません/);
+  module.HEAPU8[dstPointer] ^= 1;
+  assert.equal(run(), 0);
+  assert.match(module.UTF8ToString(module._result_error()), /ステートヘッダーがありません/);
 } finally {
   for (const [pointer] of inputs) module._free(pointer);
   module._clear_result();

@@ -83,15 +83,22 @@ struct Source {
 
 struct Target {
     Bytes body;
-    U version;
+    U format_version;
+    U emulator_version;
     bool is_compressed;
     std::map<U, std::pair<size_t, size_t>> chunks;
-    explicit Target(View data) : version(get(data, 20)), is_compressed(get(data, 28) != 0xffffffff) {
-        check(std::memcmp(part(data, 0, 16).data(), magic, 16) == 0 && get(data, 16) == 12,
-              "Expected DeSmuME DST format version 12");
+    explicit Target(View data) {
+        check(data.size() >= 16 && std::memcmp(data.data(), magic, 16) == 0,
+              "DeSmuMEのステートヘッダーがありません。DeSmuMEの File → Save State As で保存したファイルを選んでください。");
+        format_version = get(data, 16);
+        check(format_version == 12 || format_version == 13,
+              "対応するDST内部形式は12と13です。入力の内部形式は"
+              + std::to_string(format_version) + "です。");
+        emulator_version = get(data, 20);
         const auto size = get(data, 24), packed = get(data, 28);
+        is_compressed = packed != 0xffffffff;
         check(size >= 4 && size <= limit, "Invalid DST length");
-        if (packed == 0xffffffff) {
+        if (!is_compressed) {
             check(size == data.size() && size >= 36, "Invalid uncompressed DST length");
             body.assign(data.begin() + 32, data.end());
         } else {
@@ -152,8 +159,8 @@ struct Target {
             std::ranges::copy(body, output.begin() + 32);
         }
         std::memcpy(output.data(), magic, 16);
-        put(output, 16, 12);
-        put(output, 20, version);
+        put(output, 16, format_version);
+        put(output, 20, emulator_version);
         put(output, 24, body.size() + (is_compressed ? 0 : 32));
         put(output, 28, is_compressed ? size : 0xffffffff);
         output.resize(32 + size);
