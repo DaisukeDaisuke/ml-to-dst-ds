@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <map>
@@ -160,7 +161,77 @@ struct Target {
     }
 };
 
-void verify_rom(const Source& source, Target& target, View code, U rom_size) {
+// KEY1 uses Blowfish with little-endian words, swapped block order, and a
+// cartridge-specific key schedule. See melonDS src/NDSCart.cpp.
+using Key1Table = std::array<U, 0x412>;
+
+void encrypt_key1(const Key1Table& table, U* block) {
+    U left = block[1], right = block[0];
+    for (unsigned i = 0; i < 16; ++i) {
+        const U value = left ^ table[i];
+        const U mixed = ((table[0x12 + (value >> 24)]
+                        + table[0x112 + ((value >> 16) & 255)])
+                        ^ table[0x212 + ((value >> 8) & 255)])
+                        + table[0x312 + (value & 255)];
+        left = right ^ mixed;
+        right = value;
+    }
+    block[0] = left ^ table[16];
+    block[1] = right ^ table[17];
+}
+
+Key1Table key1_table(View bios, U game_code, unsigned level) {
+    Key1Table table{};
+    if (!bios.empty()) {
+        for (size_t i = 0; i < table.size(); ++i) table[i] = get(bios, 0x30 + i * 4);
+    }
+    U keycode[] = {game_code, game_code >> 1, game_code << 1};
+    for (unsigned step = 1; step <= level; ++step) {
+        if (step == 3) {
+            keycode[1] <<= 1;
+            keycode[2] >>= 1;
+        }
+        encrypt_key1(table, keycode + 1);
+        encrypt_key1(table, keycode);
+        for (unsigned i = 0; i < 18; ++i) {
+            const U word = keycode[i % 2];
+            table[i] ^= (word << 24) | ((word & 0x0000ff00) << 8)
+                      | ((word & 0x00ff0000) >> 8) | (word >> 24);
+        }
+        U block[2]{};
+        for (size_t i = 0; i < table.size(); i += 2) {
+            encrypt_key1(table, block);
+            table[i] = block[1];
+            table[i + 1] = block[0];
+        }
+    }
+    return table;
+}
+
+U normalized_rom_crc(View code, View bios) {
+    const auto header = code.first(64);
+    constexpr size_t secure_area_size = 0x800;
+    auto area = part(code, header.size(), secure_area_size);
+    std::array<Byte, secure_area_size> encrypted;
+    std::ranges::copy(area, encrypted.begin());
+    std::memcpy(encrypted.data(), "encryObj", 8);
+    auto table = key1_table(bios, get(header, 0x0c), 3);
+    auto encrypt_at = [&](size_t at) {
+        U block[] = {get(encrypted, at), get(encrypted, at + 4)};
+        encrypt_key1(table, block);
+        put(encrypted, at, block[0]);
+        put(encrypted, at + 4, block[1]);
+    };
+    for (size_t at = 0; at < encrypted.size(); at += 8) encrypt_at(at);
+    table = key1_table(bios, get(header, 0x0c), 2);
+    encrypt_at(0);
+    auto crc = crc32(0, header.data(), header.size());
+    crc = crc32(crc, encrypted.data(), encrypted.size());
+    const auto rest = code.subspan(header.size() + encrypted.size());
+    return crc32(crc, rest.data(), rest.size());
+}
+
+void verify_rom(const Source& source, Target& target, View code, U rom_size, View bios) {
     const auto header = part(code, 0, 64);
     for (unsigned at : {0x20, 0x30}) {
         auto offset = get(header, at), size = get(header, at + 12);
@@ -172,8 +243,23 @@ void verify_rom(const Source& source, Target& target, View code, U rom_size) {
     auto cart = source.at("NDSC");
     // Slot header followed by two cartridge bus interfaces.
     constexpr size_t type_offset = 20 + 2 * 61;
-    check(get(cart, type_offset) && get(cart, type_offset + 4) == crc32(0, code.data(), code.size()),
-          "The melonDS state uses a different ROM or cartridge layout");
+    check(get(cart, type_offset) != 0, "The melonDS state has no cartridge or uses an unsupported cartridge layout");
+    const U expected = get(cart, type_offset + 4);
+    if (expected == crc32(0, code.data(), code.size())) return;
+
+    const U arm9_offset = get(header, 0x20), arm9_size = get(header, 0x2c);
+    constexpr U decrypted_marker = 0xe7ffdeff;
+    if (arm9_offset >= 0x4000 && arm9_offset < 0x8000 && arm9_size >= 0x800
+        && get(code, 64) == decrypted_marker && get(code, 64 + 0x10) != decrypted_marker) {
+        // melonDS encrypts in memory when inserting a ROM with a decrypted area.
+        // Its built-in BIOS uses a zero-initialized table for this operation.
+        if (expected == normalized_rom_crc(code, {})) return;
+        check(!bios.empty(), "内蔵BIOSでのROM照合が一致しません。外部BIOSで保存した場合は、そのARM7 BIOS（bios7.bin）を選択してください。");
+        check(bios.size() == 0x4000 && crc32(0, bios.data(), bios.size()) == 0x1280f0d5,
+              "melonDSが純正DS BIOSとして認識するARM7 BIOS（bios7.bin）を選択してください。");
+        if (expected == normalized_rom_crc(code, bios)) return;
+    }
+    throw std::runtime_error("The melonDS state uses a different ROM or cartridge layout");
 }
 
 void cpu(View in, Target& out, U id, char core) {
@@ -360,14 +446,15 @@ static std::string error;
 
 extern "C" {
 int convert_state(const Byte* ml, U ml_size, const Byte* dst, U dst_size,
-                  const Byte* rom_code, U code_size, U rom_size) {
+                  const Byte* rom_code, U code_size, U rom_size,
+                  const Byte* bios, U bios_size) {
     Bytes{}.swap(result);
     error.clear();
     try {
         check(ml_size <= limit && dst_size <= limit && code_size <= limit, "Input exceeds 64 MiB");
         Source source({ml, ml_size});
         Target target({dst, dst_size});
-        verify_rom(source, target, {rom_code, code_size}, rom_size);
+        verify_rom(source, target, {rom_code, code_size}, rom_size, {bios, bios_size});
         cpu(source.at("ARM9"), target, 1, '9');
         cpu(source.at("ARM7"), target, 2, '7');
         memory(source, target);

@@ -39,10 +39,14 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   button.disabled = true;
   status.textContent = "変換中…";
-  const [ml, dst, rom] = [...form.querySelectorAll("input[type=file]")].map((input) => input.files[0]);
+  const [ml, dst, rom, bios] = [...form.querySelectorAll("input[type=file]")].map((input) => input.files[0]);
   try {
     if (!converter) converter = await createConverter();
-    const inputs = await Promise.all([readState(ml), readState(dst), readRomCode(rom)]);
+    if (bios && bios.size !== 0x4000) throw new Error("ARM7 BIOSのサイズは16 KiBです。");
+    const inputs = await Promise.all([
+      readState(ml), readState(dst), readRomCode(rom),
+      bios ? readState(bios) : new Uint8Array(),
+    ]);
     const allocations = [];
     try {
       for (const input of inputs) {
@@ -51,7 +55,7 @@ form.addEventListener("submit", async (event) => {
         allocations.push([ptr, input.length]);
         converter.HEAPU8.set(input, ptr);
       }
-      if (!converter._convert_state(...allocations.flat(), rom.size)) {
+      if (!converter._convert_state(...allocations.slice(0, 3).flat(), rom.size, ...allocations[3])) {
         throw new Error(converter.UTF8ToString(converter._result_error()));
       }
       const start = converter._result_data();

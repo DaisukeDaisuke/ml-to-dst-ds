@@ -28,7 +28,7 @@ diff --git a/src/frontend/qt_sdl/main.cpp b/src/frontend/qt_sdl/main.cpp
 +        nds->SetupDirectBoot(argv[2]);
 +        nds->ARM9Write32(0x02001000, 0x12345678);
 +        nds->ARM9.R[0] = 0x02001000;
-+        nds->ARM9.JumpTo(0x02000004);
++        nds->ARM9.JumpTo(nds->GetNDSCart()->GetHeader().ARM9EntryAddress + 4);
 +        nds->Start();
 +        melonDS::Savestate state;
 +        if (!nds->DoSavestate(&state) || state.Error) return 4;

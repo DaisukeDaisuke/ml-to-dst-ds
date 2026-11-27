@@ -47,12 +47,15 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           SDL_AUDIODRIVER: dummy
         run: |
-          mkdir -p build/probe
-          python3 tests/make-rom.py build/probe/fixture.nds
-          build/melon/melonDS --ml2dst-fixture build/probe/fixture.nds build/probe/source.ml
-          ML2DST_SAVE="$PWD/build/probe/template.dst" build/desmume/cli/desmume-cli build/probe/fixture.nds
-          node tests/wasm-smoke.mjs build/probe/{source.ml,template.dst,fixture.nds,result.dst}
-          ML2DST_LOAD="$PWD/build/probe/result.dst" build/desmume/cli/desmume-cli build/probe/fixture.nds
+          for type in homebrew retail; do
+            probe="build/probe/$type"
+            mkdir -p "$probe"
+            python3 tests/make-rom.py "$probe/fixture.nds" "--$type"
+            build/melon/melonDS --ml2dst-fixture "$probe/fixture.nds" "$probe/source.ml"
+            ML2DST_SAVE="$PWD/$probe/template.dst" build/desmume/cli/desmume-cli "$probe/fixture.nds"
+            node tests/wasm-smoke.mjs "$probe"/{source.ml,template.dst,fixture.nds,result.dst}
+            ML2DST_LOAD="$PWD/$probe/result.dst" build/desmume/cli/desmume-cli "$probe/fixture.nds"
+          done
       - uses: actions/upload-pages-artifact@v3
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
